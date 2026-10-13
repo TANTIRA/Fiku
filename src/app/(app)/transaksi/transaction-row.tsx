@@ -1,14 +1,23 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { formatRupiah } from "@/lib/money";
 import type { Category, Transaction } from "@/lib/types";
-import { changeCategory, removeTransaction } from "../actions";
+import { changeCategory, removeTransaction, type FormState } from "../actions";
 
 export function TransactionRow({ tx, categories }: { tx: Transaction; categories: Category[] }) {
   const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   const current = categories.find((c) => c.id === tx.category_id);
-  const leafOrRoot = categories.filter((c) => !categories.some((o) => o.parent_id === c.id));
+  const leaves = categories.filter((c) => !categories.some((o) => o.parent_id === c.id));
+
+  const run = (fn: () => Promise<FormState>) => {
+    setError(null);
+    start(async () => {
+      const result = await fn();
+      if (result?.error) setError(result.error);
+    });
+  };
 
   return (
     <li className={`flex flex-wrap items-center gap-3 py-2.5 ${pending ? "opacity-50" : ""}`}>
@@ -30,11 +39,11 @@ export function TransactionRow({ tx, categories }: { tx: Transaction; categories
             aria-label="Ubah kategori"
             value={tx.category_id ?? ""}
             disabled={pending}
-            onChange={(e) => start(() => changeCategory(tx.id, e.target.value))}
+            onChange={(e) => run(() => changeCategory(tx.id, e.target.value))}
             className="rounded border-2 border-ink/30 bg-white px-1 py-0.5"
           >
             {!current && <option value="">Tanpa kategori</option>}
-            {leafOrRoot.map((c) => (
+            {leaves.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.icon} {c.name}
               </option>
@@ -50,13 +59,18 @@ export function TransactionRow({ tx, categories }: { tx: Transaction; categories
         type="button"
         disabled={pending}
         onClick={() => {
-          if (confirm(`Hapus "${tx.description}"?`)) start(() => removeTransaction(tx.id));
+          if (confirm(`Hapus "${tx.description}"?`)) run(() => removeTransaction(tx.id));
         }}
         className="rounded border-2 border-transparent px-1.5 text-sm hover:border-berry hover:bg-berry-soft"
         aria-label="Hapus transaksi"
       >
         🗑
       </button>
+      {error && (
+        <p role="alert" className="w-full text-xs text-berry">
+          {error}
+        </p>
+      )}
     </li>
   );
 }

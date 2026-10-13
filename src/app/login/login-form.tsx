@@ -1,12 +1,19 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { Fuku } from "@/components/fuku/fuku";
 import { authenticate, type AuthState } from "./actions";
 
 export function LoginForm() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [state, action, pending] = useActionState<AuthState, FormData>(authenticate, { mode: "login" });
+
+  // This page only renders while signed out — drop any chat history left by a previous account.
+  useEffect(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("fuku-chat")) localStorage.removeItem(key);
+    }
+  }, []);
 
   return (
     <div className="pixel-card w-full max-w-sm p-6">
@@ -30,7 +37,7 @@ export function LoginForm() {
             name="password"
             type="password"
             required
-            minLength={6}
+            minLength={8}
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             className="pixel-input"
           />
@@ -38,6 +45,11 @@ export function LoginForm() {
         {state.error && (
           <p role="alert" className="rounded border-2 border-berry bg-berry-soft px-3 py-2 text-sm">
             {state.error}
+          </p>
+        )}
+        {state.notice && (
+          <p role="status" className="rounded border-2 border-jade bg-jade-soft px-3 py-2 text-sm">
+            {state.notice}
           </p>
         )}
         <button type="submit" disabled={pending} className="pixel-btn w-full">

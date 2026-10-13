@@ -56,13 +56,20 @@ export function amountFromMatch(digits: string, suffix?: string): number | null 
         : Number(digits.replace(/[.,]/g, ""));
     value *= MULTIPLIERS[suffix.toLowerCase()];
   } else {
-    // Without a multiplier, separators are thousands marks ("25.000", "1,500,000").
+    // Without a multiplier, 3-digit groups are thousands marks ("25.000", "1,500,000").
     const parts = digits.split(/[.,]/);
     const last = parts[parts.length - 1];
-    value =
-      parts.length > 1 && last.length !== 3
-        ? Number(`${parts.slice(0, -1).join("")}.${last}`)
-        : Number(digits.replace(/[.,]/g, ""));
+    if (parts.length === 1) {
+      // A bare number under 1000 is ambiguous ("kopi 25" is not Rp25); refuse it.
+      value = Number(digits);
+      if (value < 1000) return null;
+    } else if (last.length === 3) {
+      value = Number(digits.replace(/[.,]/g, ""));
+    } else {
+      // "1,5" reads as one-and-a-half thousand in practice, not Rp1.5.
+      value = Number(`${parts.slice(0, -1).join("")}.${last}`);
+      if (value < 1000) value *= 1000;
+    }
   }
   const rounded = Math.round(value);
   return Number.isFinite(rounded) && rounded > 0 ? rounded : null;

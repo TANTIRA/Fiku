@@ -22,8 +22,18 @@ import {
 import { currentMonth, isMonthKey, monthLabel, TIMEZONE } from "@/lib/dates";
 import { env } from "@/lib/env";
 import { getSession, listCategories, type Session } from "@/lib/finance";
+import { allowRequest } from "@/lib/rate-limit";
 
 export const maxDuration = 60;
+
+const MAX_BODY_BYTES = 64 * 1024;
+const MAX_MESSAGES = 30;
+
+const IncomingMessage = z.looseObject({
+  id: z.string(),
+  role: z.enum(["user", "assistant", "system"]),
+  parts: z.array(z.looseObject({ type: z.string() })).catch([]),
+});
 
 const Month = z
   .string()
@@ -117,20 +127,28 @@ Kategori pemasukan: ${categories.income.join(", ")}.`;
 
 function lastUserText(messages: UIMessage[]): string {
   const last = [...messages].reverse().find((m) => m.role === "user");
-  return (
-    last?.parts
-      .map((p) => (p.type === "text" ? p.text : ""))
-      .join(" ")
-      .trim() ?? ""
-  );
+  if (!last || !Array.isArray(last.parts)) return "";
+  return last.parts
+    .map((p) => (p.type === "text" ? p.text : ""))
+    .join(" ")
+    .trim();
 }
 
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return new Response("Unauthorized", { status: 401 });
+  if (!allowRequest(session.userId, 30, 60_000)) {
+    return new Response("Terlalu banyak pesan. Istirahat dulu ya.", { status: 429 });
+  }
 
-  const body = (await req.json()) as { messages?: UIMessage[] };
-  const messages = Array.isArray(body.messages) ? body.messages.slice(-30) : [];
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) {
+    return new Response("Payload too large", { status: 413 });
+  }
+  const parsed = z
+    .object({ messages: z.array(IncomingMessage) })
+    .safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return new Response("Bad request", { status: 400 });
+  const messages = parsed.data.messages.slice(-MAX_MESSAGES) as UIMessage[];
   if (!messages.length) return new Response("Bad request", { status: 400 });
 
   if (!env.llm.enabled) {
@@ -162,10 +180,17 @@ export async function POST(req: Request) {
   });
   const categories = categoryNames(await listCategories(session));
 
+  let modelMessages;
+  try {
+    modelMessages = await convertToModelMessages(messages);
+  } catch {
+    return new Response("Bad request", { status: 400 });
+  }
+
   const result = streamText({
     model: provider.chatModel(env.llm.model!),
     system: systemPrompt(categories),
-    messages: await convertToModelMessages(messages),
+    messages: modelMessages,
     tools: buildTools(session),
     stopWhen: isStepCount(5),
   });

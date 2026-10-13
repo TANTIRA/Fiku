@@ -70,6 +70,11 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
             <NecessityBar label="Kebutuhan" target={50} value={summary.byNecessity.kebutuhan} income={summary.income} color="var(--sky)" />
             <NecessityBar label="Keinginan" target={30} value={summary.byNecessity.keinginan} income={summary.income} color="var(--berry)" />
             <NecessityBar label="Tabungan" target={20} value={summary.byNecessity.tabungan} income={summary.income} color="var(--jade)" saving />
+            {summary.byNecessity.uncategorized > 0 && (
+              <p className="text-xs opacity-60">
+                {formatCompact(summary.byNecessity.uncategorized)} belum terkategori — tidak masuk hitungan di atas.
+              </p>
+            )}
           </div>
         </section>
 

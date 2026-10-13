@@ -7,12 +7,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "infra:up": "docker compose up -d && supabase start",
     "infra:down": "docker compose down && supabase stop",
     "infra:status": "docker compose ps && supabase status",
     "typedb:setup": "node scripts/typedb-setup.mjs",
-    "gen:icons": "tsx scripts/gen-icons.ts"
+    "gen:icons": "tsx scripts/gen-icons.ts",
+    "gen:fonts": "tsx scripts/gen-fonts.ts",
+    "font:check": "python3 scripts/font-check.py",
+    "font:specimen": "python3 scripts/font-specimen.py"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.68",
@@ -35,6 +39,7 @@
     "eslint-config-next": "16.4.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }

@@ -51,17 +51,26 @@ export function detectKind(text: string): TxKind {
   return INCOME_WORDS.some((w) => new RegExp(`\\b${w}\\b`).test(lower)) ? "income" : "expense";
 }
 
+const AMOUNT_GLOBAL = new RegExp(AMOUNT_PATTERN.source, "gi");
+
+/** Valid amount matches only — bare numbers that parse to nothing are skipped. */
+function* matchAmounts(text: string) {
+  for (const m of text.matchAll(AMOUNT_GLOBAL)) {
+    const amount = amountFromMatch(m[1], m[2]);
+    if (amount) yield { match: m, amount };
+  }
+}
+
 export function hasAmount(text: string): boolean {
-  return AMOUNT_PATTERN.test(text);
+  return !matchAmounts(text).next().done;
 }
 
 function parseOne(segment: string, now: Date): ParsedTransaction | null {
-  const match = segment.match(AMOUNT_PATTERN);
-  if (!match) return null;
-  const amount = amountFromMatch(match[1], match[2]);
-  if (!amount) return null;
+  const hit = matchAmounts(segment).next().value;
+  if (!hit) return null;
+  const { amount } = hit;
 
-  let rest = segment.replace(match[0], " ");
+  let rest = segment.replace(hit.match[0], " ");
   let occurredAt = now;
   for (const { pattern, days } of DATE_WORDS) {
     const m = rest.match(pattern);
@@ -81,18 +90,40 @@ function parseOne(segment: string, now: Date): ParsedTransaction | null {
     rest = rest.slice(0, cp.index);
   }
 
+  // Detect income/expense on the cleaned text so counterparty names don't trigger income words.
+  const kind = detectKind(rest.trim() || segment);
   const description =
     rest.replace(/\b(tf|trf)\b/gi, "transfer").replace(FILLER, " ").replace(/\s+/g, " ").replace(/^[\s,.-]+|[\s,.-]+$/g, "").trim() ||
     counterparty ||
-    (detectKind(segment) === "income" ? "Pemasukan" : "Pengeluaran");
+    (kind === "income" ? "Pemasukan" : "Pengeluaran");
 
   return {
-    kind: detectKind(segment),
+    kind,
     amount,
     description: titleCase(description).slice(0, 200),
     counterparty: counterparty ? titleCase(counterparty).slice(0, 100) : null,
     occurredAt,
   };
+}
+
+/**
+ * Split "bensin 30rb parkir 5rb" at each amount: the words before an amount
+ * describe that amount's transaction ("bensin" → 30rb, "parkir" → 5rb).
+ * Leftover words after the last amount stay with it.
+ */
+function splitOnAmounts(segment: string): string[] {
+  const hits = [...matchAmounts(segment)];
+  if (hits.length <= 1) return [segment];
+  const pieces: string[] = [];
+  let start = 0;
+  for (const hit of hits) {
+    const end = hit.match.index! + hit.match[0].length;
+    pieces.push(segment.slice(start, end));
+    start = end;
+  }
+  const tail = segment.slice(start).trim();
+  if (tail) pieces[pieces.length - 1] += ` ${tail}`;
+  return pieces.filter((p) => p.trim());
 }
 
 /**
@@ -102,9 +133,16 @@ function parseOne(segment: string, now: Date): ParsedTransaction | null {
 export function parseTransactions(text: string, now = new Date()): ParsedTransaction[] {
   const cleaned = text.trim();
   if (!cleaned) return [];
-  const parts = cleaned.split(SPLIT).filter(Boolean);
-  const segments = parts.length > 1 && parts.every(hasAmount) ? parts : [cleaned];
-  const parsed = segments.map((s) => parseOne(s, now)).filter((t): t is ParsedTransaction => t !== null);
+  // Separated parts without an amount belong to the previous item ("makan 25rb, parkir").
+  const segments: string[] = [];
+  for (const part of cleaned.split(SPLIT).filter(Boolean)) {
+    if (hasAmount(part) || !segments.length) segments.push(part);
+    else segments[segments.length - 1] += ` ${part}`;
+  }
+  const parsed = segments
+    .flatMap(splitOnAmounts)
+    .map((s) => parseOne(s, now))
+    .filter((t): t is ParsedTransaction => t !== null);
   // "bensin 30rb, parkir 5rb kemarin": a single date word applies to the whole message.
   const dated = parsed.filter((t) => t.occurredAt !== now);
   if (dated.length === 1) for (const t of parsed) t.occurredAt = dated[0].occurredAt;

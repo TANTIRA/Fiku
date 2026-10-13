@@ -49,6 +49,7 @@ export async function recordTransactions(session: Session, items: RecordInput[])
       occurredAt: i.daysAgo ? daysAgo(Math.min(Math.max(i.daysAgo, 0), 365), now) : now,
       source: "assistant",
     })),
+    categories,
   );
   return created.map((t) => ({
     id: t.id,
@@ -79,6 +80,7 @@ export async function summaryFor(session: Session, month: MonthKey) {
       keinginanPct: s.income ? Math.round((s.byNecessity.keinginan / s.income) * 100) : null,
       tabunganPct: s.income ? Math.round((s.byNecessity.tabungan / s.income) * 100) : null,
     },
+    uncategorized: s.byNecessity.uncategorized,
   };
 }
 
@@ -145,7 +147,7 @@ export async function offlineReply(session: Session, raw: string): Promise<Offli
     };
   }
 
-  if (/^(hapus|batal|batalkan|undo|salah)\b/.test(lower)) {
+  if (/^(hapus|hapusin|batalkan|batalin|undo)\b/.test(lower)) {
     const [last] = (await listTransactions(session, { limit: 20 })).filter((t) => t.source === "assistant");
     if (!last) return { text: "Belum ada catatan dari chat yang bisa kuhapus." };
     await deleteTransaction(session, last.id);

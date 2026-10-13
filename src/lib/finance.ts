@@ -10,6 +10,7 @@ import type {
   CategoryTotal,
   MonthlySummary,
   Necessity,
+  NecessityBucket,
   Transaction,
   TxKind,
 } from "@/lib/types";
@@ -87,13 +88,32 @@ async function syncToOntology(session: Session, txs: Transaction[], categories?:
   }
 }
 
+const lastUnsyncedRetry = new Map<string, number>();
+
 export async function retryUnsynced(session: Session): Promise<void> {
+  // Throttle: when TypeDB is down, retrying on every render stalls the page for seconds.
+  const now = Date.now();
+  if (now - (lastUnsyncedRetry.get(session.userId) ?? 0) < 60_000) return;
+  lastUnsyncedRetry.set(session.userId, now);
+  if (lastUnsyncedRetry.size > 1000) lastUnsyncedRetry.clear();
+
   const { data } = await session.supabase
     .from("transactions")
     .select(TX_COLUMNS)
     .eq("ontology_synced", false)
     .limit(200);
   if (data?.length) await syncToOntology(session, data as Transaction[]);
+}
+
+/** Ensure the user's graph exists; returns whether it did (so callers can skip re-checks). */
+async function ensureGraph(session: Session, categories: Category[]): Promise<boolean> {
+  try {
+    await ontology.ensureUserGraph(session.userId, categories);
+    return true;
+  } catch (err) {
+    console.error("[ontology] ensure graph failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
 }
 
 /**
@@ -104,12 +124,13 @@ export async function categorize(
   session: Session,
   input: { kind: TxKind; description: string; counterparty?: string | null },
   categories: Category[],
+  graphReady = false,
 ): Promise<{ category: Category; reason: "riwayat" | "kata kunci" | "default" }> {
   const ofKind = categories.filter((c) => c.kind === input.kind);
   const byId = new Map(ofKind.map((c) => [c.id, c]));
 
   try {
-    await ontology.ensureUserGraph(session.userId, categories);
+    if (!graphReady) await ontology.ensureUserGraph(session.userId, categories);
     for (const label of [input.counterparty, input.description]) {
       if (!label) continue;
       const id = await ontology.learnedCategory(session.userId, label, input.kind);
@@ -150,9 +171,11 @@ export type NewTransaction = {
 export async function createTransactions(
   session: Session,
   items: NewTransaction[],
+  knownCategories?: Category[],
 ): Promise<(Transaction & { category: Category | null; categoryReason: string | null })[]> {
   if (items.length === 0) return [];
-  const categories = await listCategories(session);
+  const categories = knownCategories ?? (await listCategories(session));
+  const graphReady = await ensureGraph(session, categories);
   const rows = [];
   const reasons: (string | null)[] = [];
   for (const item of items) {
@@ -162,7 +185,7 @@ export async function createTransactions(
       categoryId = null;
     }
     if (!categoryId) {
-      const picked = await categorize(session, item, categories);
+      const picked = await categorize(session, item, categories, graphReady);
       categoryId = picked.category?.id ?? null;
       reason = picked.reason;
     }
@@ -224,12 +247,22 @@ export async function deleteTransaction(session: Session, id: string): Promise<T
 }
 
 export async function rebuildOntology(session: Session): Promise<number> {
-  const [categories, { data, error }] = await Promise.all([
-    listCategories(session),
-    session.supabase.from("transactions").select(TX_COLUMNS),
-  ]);
-  if (error) throw error;
-  const txs = (data as Transaction[]).map((t) => ({ ...t, amount: Number(t.amount) }));
+  const categories = await listCategories(session);
+  // PostgREST caps responses (max_rows); page through so nothing is silently skipped.
+  const txs: Transaction[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await session.supabase
+      .from("transactions")
+      .select(TX_COLUMNS)
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as Transaction[];
+    txs.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  for (const t of txs) t.amount = Number(t.amount);
   await ontology.rebuildUser(session.userId, categories, txs);
   if (txs.length) {
     await session.supabase.from("transactions").update({ ontology_synced: true }).in(
@@ -291,7 +324,7 @@ export async function monthlySummary(session: Session, month: MonthKey): Promise
   };
 
   let byRoot: CategoryTotal[];
-  let byNecessity: Record<Necessity, number>;
+  let byNecessity: Record<NecessityBucket, number>;
   let reasoning: MonthlySummary["reasoning"] = "typedb";
 
   try {
@@ -310,10 +343,10 @@ export async function monthlySummary(session: Session, month: MonthKey): Promise
       const r = t.category_id ? rootOf(t.category_id, byId) : undefined;
       return { name: r?.name ?? "Tanpa kategori", icon: r?.icon ?? "❔" };
     });
-    byNecessity = { kebutuhan: 0, keinginan: 0, tabungan: 0 };
+    byNecessity = { kebutuhan: 0, keinginan: 0, tabungan: 0, uncategorized: 0 };
     for (const t of expenses) {
       const n = t.category_id ? necessityOf(t.category_id, byId) : null;
-      byNecessity[n ?? "keinginan"] += t.amount;
+      byNecessity[n ?? "uncategorized"] += t.amount;
     }
   }
 
@@ -331,10 +364,13 @@ export async function monthlySummary(session: Session, month: MonthKey): Promise
 }
 
 export async function overallBalance(session: Session): Promise<number> {
-  const { data, error } = await session.supabase.from("transactions").select("kind, amount");
+  // Aggregate in Postgres: selecting raw rows would silently truncate at max_rows.
+  const { data, error } = await session.supabase
+    .from("transactions")
+    .select("kind, amount.sum()");
   if (error) throw error;
-  return (data ?? []).reduce(
-    (s, t) => s + (t.kind === "income" ? Number(t.amount) : -Number(t.amount)),
+  return (data as { kind: TxKind; sum: number | string }[]).reduce(
+    (s, r) => s + (r.kind === "income" ? Number(r.sum) : -Number(r.sum)),
     0,
   );
 }

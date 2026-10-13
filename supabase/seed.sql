@@ -1,0 +1,2 @@
+-- Intentionally empty: default categories are seeded per user by the
+-- public.handle_new_user() trigger (see migrations/20261013000000_init.sql).

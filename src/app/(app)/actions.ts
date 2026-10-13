@@ -27,7 +27,15 @@ const NewTx = z.object({
   description: z.string().trim().min(1, "Isi keterangan dulu").max(200),
   counterparty: z.string().trim().max(100).optional(),
   categoryId: z.union([z.uuid(), z.literal("")]).optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Tanggal tidak valid"),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Tanggal tidak valid")
+    // Reject impossible dates like 2026-02-31 instead of letting Date normalize them.
+    .refine((v) => {
+      const [y, m, d] = v.split("-").map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+    }, "Tanggal tidak valid"),
 });
 
 export async function addTransaction(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -54,17 +62,32 @@ export async function addTransaction(_prev: FormState, formData: FormData): Prom
   }
 }
 
-export async function changeCategory(id: string, categoryId: string): Promise<void> {
+export async function changeCategory(id: string, categoryId: string): Promise<FormState> {
   const session = await requireSession();
-  const ids = z.tuple([z.uuid(), z.uuid()]).parse([id, categoryId]);
-  await updateTransactionCategory(session, ids[0], ids[1]);
-  refresh();
+  const ids = z.tuple([z.uuid(), z.uuid()]).safeParse([id, categoryId]);
+  if (!ids.success) return { error: "Kategori tidak valid." };
+  try {
+    await updateTransactionCategory(session, ids.data[0], ids.data[1]);
+    refresh();
+    return {};
+  } catch (err) {
+    console.error(err);
+    return { error: "Gagal mengubah kategori." };
+  }
 }
 
-export async function removeTransaction(id: string): Promise<void> {
+export async function removeTransaction(id: string): Promise<FormState> {
   const session = await requireSession();
-  await deleteTransaction(session, z.uuid().parse(id));
-  refresh();
+  const parsed = z.uuid().safeParse(id);
+  if (!parsed.success) return { error: "Transaksi tidak valid." };
+  try {
+    await deleteTransaction(session, parsed.data);
+    refresh();
+    return {};
+  } catch (err) {
+    console.error(err);
+    return { error: "Gagal menghapus transaksi." };
+  }
 }
 
 export async function resyncOntology(): Promise<FormState> {

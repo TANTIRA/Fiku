@@ -20,7 +20,6 @@ type Recorded = {
   occurredAt: string;
 };
 
-const STORAGE_KEY = "fuku-chat-v1";
 const SUGGESTIONS = [
   "makan siang 25rb",
   "bensin 30rb, parkir 5rb kemarin",
@@ -40,34 +39,35 @@ const GREETING: UIMessage = {
   ],
 };
 
-function loadMessages(): UIMessage[] {
+function loadMessages(storageKey: string): UIMessage[] {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
+    const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null");
     return Array.isArray(saved) && saved.length ? saved : [GREETING];
   } catch {
     return [GREETING];
   }
 }
 
-export function Chat() {
+export function Chat({ userId }: { userId: string }) {
+  const storageKey = `fuku-chat-${userId}`;
   const [input, setInput] = useState("");
-  const { messages, sendMessage, status, error, setMessages } = useChat({ id: "fuku-chat", messages: [GREETING] });
+  const { messages, sendMessage, status, error, setMessages } = useChat({ id: storageKey, messages: [GREETING] });
   const bottomRef = useRef<HTMLDivElement>(null);
   const restored = useRef(false);
   const busy = status === "submitted" || status === "streaming";
 
   // Restore history after mount (localStorage isn't available during SSR).
   useEffect(() => {
-    setMessages(loadMessages());
+    setMessages(loadMessages(storageKey));
     restored.current = true;
-  }, [setMessages]);
+  }, [setMessages, storageKey]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     if (restored.current && status === "ready") {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-40)));
+      localStorage.setItem(storageKey, JSON.stringify(messages.slice(-40)));
     }
-  }, [messages, status]);
+  }, [messages, status, storageKey]);
 
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
   const justRecorded = lastAssistant ? recordedIn(lastAssistant) : [];
@@ -100,7 +100,7 @@ export function Chat() {
           type="button"
           onClick={() => {
             setMessages([GREETING]);
-            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(storageKey);
           }}
           className="pixel-btn pixel-btn-ghost px-3 py-1 text-xs"
         >
@@ -169,9 +169,12 @@ export function Chat() {
 function recordedIn(message: UIMessage): Recorded[] {
   const out: Recorded[] = [];
   for (const part of message.parts) {
-    if (part.type === "data-recorded") out.push(...(part.data as Recorded[]));
+    if (part.type === "data-recorded" && Array.isArray(part.data)) {
+      out.push(...(part.data as Recorded[]));
+    }
     if (part.type === "tool-recordTransactions" && part.state === "output-available") {
-      out.push(...((part.output as { recorded: Recorded[] }).recorded ?? []));
+      const recorded = (part.output as { recorded?: Recorded[] })?.recorded;
+      if (Array.isArray(recorded)) out.push(...recorded);
     }
   }
   return out;

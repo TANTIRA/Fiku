@@ -1,7 +1,7 @@
 import "server-only";
 import { datetime, readRows, str, write } from "@/lib/typedb";
 import { normalizeKey } from "@/lib/parser";
-import type { Category, Necessity, Transaction } from "@/lib/types";
+import type { Category, Necessity, NecessityBucket, Transaction } from "@/lib/types";
 
 /**
  * TypeDB projection of the ledger. Postgres stays the system of record; this graph holds
@@ -14,23 +14,56 @@ export function counterpartyKey(userId: string, tx: Pick<Transaction, "counterpa
   return label ? { key: `${userId}:${label}`, label } : null;
 }
 
-async function existingCategoryIds(userId: string): Promise<Set<string> | null> {
+type GraphCategory = { id: string; name?: string; necessity?: string };
+
+async function existingCategories(userId: string): Promise<GraphCategory[] | null> {
   const rows = await readRows(`
     match $u isa person, has ref-id ${str(userId)};
-    try { owning (owner: $u, owned: $c); $c isa category, has ref-id $id; };
-    select $id;`);
+    try {
+      owning (owner: $u, owned: $c);
+      $c isa category, has ref-id $id;
+      try { $c has name $n; };
+      try { $c has necessity $x; };
+    };
+    select $id, $n, $x;`);
   if (rows.length === 0) return null; // person missing
-  return new Set(rows.map((r) => r.id).filter((id): id is string => typeof id === "string"));
+  return rows
+    .filter((r) => typeof r.id === "string")
+    .map((r) => ({
+      id: r.id as string,
+      name: typeof r.n === "string" ? r.n : undefined,
+      necessity: typeof r.x === "string" ? r.x : undefined,
+    }));
+}
+
+/** Patch attributes that drifted in Postgres (rename, necessity change). */
+async function repairCategory(id: string, category: Category): Promise<void> {
+  await write(`
+    match $c isa category, has ref-id ${str(id)};
+      try { $c has name $on; };
+      try { $c has necessity $ox; };
+    delete try { $on; }; try { $ox; };
+    insert
+      $c has name ${str(category.name)};
+      ${category.necessity ? `$c has necessity ${str(category.necessity)};` : ""}`);
 }
 
 /** Make sure the person and all their categories (plus hierarchy) exist in the graph. */
 export async function ensureUserGraph(userId: string, categories: Category[]): Promise<void> {
-  let existing = await existingCategoryIds(userId);
+  let existing = await existingCategories(userId);
   if (existing === null) {
     await write(`insert $u isa person, has ref-id ${str(userId)};`);
-    existing = new Set();
+    existing = [];
   }
-  const missing = categories.filter((c) => !existing.has(c.id));
+  const byId = new Map(existing.map((c) => [c.id, c]));
+  const missing = categories.filter((c) => !byId.has(c.id));
+
+  for (const c of categories) {
+    const g = byId.get(c.id);
+    if (g && (g.name !== c.name || (g.necessity ?? null) !== c.necessity)) {
+      await repairCategory(c.id, c);
+    }
+  }
   if (missing.length === 0) return;
 
   const inserts = missing.map((c, i) => {
@@ -118,7 +151,7 @@ export async function rebuildUser(
 
 type Rollup = {
   byRoot: { name: string; total: number; count: number }[];
-  byNecessity: Record<Necessity, number>;
+  byNecessity: Record<NecessityBucket, number>;
 };
 
 /** Expense rolled up the hierarchy using the `category_root` / `effective_necessity` functions. */
@@ -141,7 +174,12 @@ export async function expenseRollup(userId: string, start: Date, end: Date): Pro
       reduce $total = sum($a) groupby $n;`),
   ]);
 
-  const byNecessity: Record<Necessity, number> = { kebutuhan: 0, keinginan: 0, tabungan: 0 };
+  const byNecessity: Record<NecessityBucket, number> = {
+    kebutuhan: 0,
+    keinginan: 0,
+    tabungan: 0,
+    uncategorized: 0,
+  };
   for (const row of needs) byNecessity[row.n as Necessity] = Number(row.total);
 
   return {

@@ -1,5 +1,7 @@
 export type TxKind = "income" | "expense";
 export type Necessity = "kebutuhan" | "keinginan" | "tabungan";
+/** Necessity plus the bucket for expenses whose category carries none. */
+export type NecessityBucket = Necessity | "uncategorized";
 
 export type Category = {
   id: string;
@@ -41,7 +43,7 @@ export type MonthlySummary = {
   byCategory: CategoryTotal[];
   incomeByCategory: CategoryTotal[];
   /** 50/30/20 split using necessity inherited through the hierarchy. */
-  byNecessity: Record<Necessity, number>;
+  byNecessity: Record<NecessityBucket, number>;
   /** Where the hierarchy reasoning came from. */
   reasoning: "typedb" | "fallback";
 };
