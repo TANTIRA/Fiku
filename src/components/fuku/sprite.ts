@@ -1,18 +1,21 @@
-// Fuku 福 — an 8-bit coin critter with a savings sprout. 16×16 pixel grid.
+// Fuku 福 — an 8-bit chibi mecha critter with a V-fin and armor plates. 16×16 pixel grid.
 
 export type Mood = "idle" | "blink" | "happy" | "thinking" | "worried" | "sleepy";
 
 export const PALETTE = {
-  o: "#3b2417", // outline
-  b: "#f5b942", // body (gold)
-  h: "#ffe08a", // highlight
-  s: "#d98e2b", // shade
-  l: "#5cc26b", // leaf
-  L: "#2f8f4e", // leaf dark
-  e: "#3b2417", // eyes
+  o: "#1c2230", // outline
+  w: "#f4f6f9", // armor white
+  W: "#c3ccda", // armor white, shaded
+  b: "#2f6fd0", // armor blue
+  B: "#1e4a95", // armor blue, shaded
+  r: "#e04444", // red trim
+  R: "#a82626", // red trim, shaded
+  y: "#f6c344", // V-fin / cockpit
+  Y: "#c99a1e", // yellow, shaded
+  g: "#8ef07a", // eye glow
+  e: "#1c2230", // eyes, shut
   p: "#ff8fa3", // blush
-  m: "#c2410c", // mouth
-  w: "#ffffff", // eye shine / sparkle
+  m: "#2b3444", // face mask / vent
   d: "#6cc4ff", // sweat drop
   z: "#9aa4b2", // zzz
 } as const;
@@ -21,66 +24,70 @@ export type Color = keyof typeof PALETTE;
 
 // Body without a face. '.' is transparent.
 const BODY = [
-  "........ooo.....",
-  ".......ollLo....",
-  "......olLLo.....",
-  "....ooooLoooo...",
-  "...ohhbbbbbbbo..",
-  "..ohhbbbbbbbbbo.",
-  "..ohbbbbbbbbbbo.",
-  "..obbbbbbbbbbbo.",
-  "..obbbbbbbbbbbo.",
-  ".oobbbbbbbbbbsoo",
-  ".oobbbbbbbbbbsoo",
-  "..osbbbbbbbbsso.",
-  "...ossssssssso..",
-  "....ooooooooo...",
-  ".....o.o.o.o....",
-  ".....o.o.o.o....",
+  "....y......y....",
+  ".....y....y.....",
+  "......y..y......",
+  "..oooooooooooo..",
+  "..owwwwrrwwwWo..",
+  "..owwwwwwwwwWo..",
+  "..owwwwwwwwwWo..",
+  "..owwwwwwwwwWo..",
+  "....oooooooo....",
+  ".obbbwwwwwWbbbo.",
+  ".obbowyyYYWobbo.",
+  ".obbowwwwwWobbo.",
+  "...owrrrrrRwo...",
+  "...obbo..obbo...",
+  "...owWo..owWo...",
+  "...obBo..obBo...",
 ];
 
 type Pixel = [x: number, y: number, c: Color];
 
 const blush: Pixel[] = [
-  [4, 9, "p"],
-  [11, 9, "p"],
+  [4, 6, "p"],
+  [11, 6, "p"],
+];
+
+// Lower-face mask with a vent gap; every mood wears it.
+const mask: Pixel[] = [
+  [6, 6, "m"], [7, 6, "m"], [8, 6, "m"], [9, 6, "m"],
+  [5, 7, "m"], [6, 7, "m"], [9, 7, "m"], [10, 7, "m"],
 ];
 
 const FACES: Record<Mood, Pixel[]> = {
   idle: [
-    [5, 7, "e"], [5, 8, "e"], [10, 7, "e"], [10, 8, "e"],
-    [5, 7, "w"], [10, 7, "w"],
+    [5, 5, "g"], [6, 5, "g"], [9, 5, "g"], [10, 5, "g"],
+    ...mask,
     ...blush,
-    [7, 10, "m"], [8, 10, "m"],
   ],
   blink: [
-    [4, 8, "e"], [5, 8, "e"], [10, 8, "e"], [11, 8, "e"],
+    [5, 5, "e"], [6, 5, "e"], [9, 5, "e"], [10, 5, "e"],
+    ...mask,
     ...blush,
-    [7, 10, "m"], [8, 10, "m"],
   ],
   happy: [
-    [5, 7, "e"], [4, 8, "e"], [6, 8, "e"],
-    [10, 7, "e"], [9, 8, "e"], [11, 8, "e"],
+    [5, 5, "g"], [6, 4, "g"], [9, 4, "g"], [10, 5, "g"],
+    [7, 7, "m"], [8, 7, "m"],
+    ...mask,
     ...blush,
-    [6, 10, "m"], [9, 10, "m"], [7, 11, "m"], [8, 11, "m"],
   ],
   thinking: [
-    [6, 6, "e"], [6, 7, "e"], [11, 6, "e"], [11, 7, "e"],
+    [5, 4, "g"], [6, 4, "g"], [9, 4, "g"], [10, 4, "g"],
+    ...mask,
     ...blush,
-    [8, 10, "m"],
   ],
   worried: [
-    [4, 6, "e"], [11, 6, "e"],
-    [5, 8, "e"], [10, 8, "e"],
+    [5, 4, "g"], [6, 5, "g"], [9, 5, "g"], [10, 4, "g"],
+    ...mask,
     ...blush,
-    [6, 11, "m"], [7, 10, "m"], [8, 10, "m"], [9, 11, "m"],
-    [13, 4, "d"], [13, 5, "d"], [12, 5, "d"],
+    [14, 4, "d"], [14, 5, "d"], [15, 5, "d"],
   ],
   sleepy: [
-    [4, 8, "e"], [5, 8, "e"], [10, 8, "e"], [11, 8, "e"],
+    [5, 5, "e"], [6, 5, "e"], [7, 5, "e"], [8, 5, "e"], [9, 5, "e"], [10, 5, "e"],
+    ...mask,
     ...blush,
-    [7, 10, "m"],
-    [13, 0, "z"], [14, 0, "z"], [15, 0, "z"], [15, 1, "z"], [14, 2, "z"], [13, 3, "z"], [14, 3, "z"], [15, 3, "z"],
+    [14, 0, "z"], [15, 0, "z"], [15, 1, "z"], [14, 2, "z"], [15, 2, "z"],
   ],
 };
 
@@ -92,9 +99,8 @@ export function spritePixels(mood: Mood): Pixel[] {
       if (c !== ".") pixels.push([x, y, c as Color]);
     }
   });
-  const face = FACES[mood].filter(([, , c]) => c !== "w"); // eye shine reserved for large renders
   const map = new Map(pixels.map((p) => [`${p[0]},${p[1]}`, p]));
-  for (const p of face) map.set(`${p[0]},${p[1]}`, p);
+  for (const p of FACES[mood]) map.set(`${p[0]},${p[1]}`, p);
   return [...map.values()];
 }
 
