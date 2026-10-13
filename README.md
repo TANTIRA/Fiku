@@ -1,0 +1,2 @@
+# Fiku
+Agentic Money Management
