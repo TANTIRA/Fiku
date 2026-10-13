@@ -1,0 +1,68 @@
+define
+  attribute ref-id, value string;
+  attribute name, value string;
+  attribute amount, value integer;
+  attribute occurred-at, value datetime;
+  attribute flow, value string @values("income", "expense");
+  attribute necessity, value string @values("kebutuhan", "keinginan", "tabungan");
+  attribute keyword, value string;
+  attribute note, value string;
+
+  entity person,
+    owns ref-id @key,
+    plays owning:owner;
+
+  entity category,
+    owns ref-id @key,
+    owns name,
+    owns flow,
+    owns necessity @card(0..1),
+    owns keyword @card(0..),
+    plays owning:owned,
+    plays category-hierarchy:parent,
+    plays category-hierarchy:child,
+    plays classification:category;
+
+  entity transaction @abstract,
+    owns ref-id @key,
+    owns amount,
+    owns occurred-at,
+    owns note @card(0..1),
+    plays owning:owned,
+    plays classification:item,
+    plays transacted-with:transaction;
+  entity income sub transaction;
+  entity expense sub transaction;
+
+  entity counterparty,
+    owns ref-id @key,
+    owns name,
+    plays owning:owned,
+    plays transacted-with:counterparty;
+
+  relation owning,
+    relates owner,
+    relates owned @card(1..1);
+  relation category-hierarchy,
+    relates parent,
+    relates child;
+  relation classification,
+    relates item @card(1..1),
+    relates category @card(1..1);
+  relation transacted-with,
+    relates transaction @card(1..1),
+    relates counterparty @card(1..1);
+
+  fun category_root($c: category) -> { category }:
+    match
+      { not { category-hierarchy (child: $c); }; $r is $c; } or
+      { category-hierarchy (child: $c, parent: $p); let $r in category_root($p); };
+    return { $r };
+
+  fun effective_necessity($c: category) -> { necessity }:
+    match
+      { $c has necessity $n; } or
+      { not { $c has necessity $x; };
+        category-hierarchy (child: $c, parent: $p);
+        let $n in effective_necessity($p); };
+    return { $n };

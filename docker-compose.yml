@@ -1,0 +1,14 @@
+name: fuku
+services:
+  typedb:
+    image: typedb/typedb:3.13.0
+    container_name: fuku-typedb
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1729:1729"
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - typedb-data:/var/lib/typedb/data
+
+volumes:
+  typedb-data:
